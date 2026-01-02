@@ -7,7 +7,26 @@ import plotly.express as px
 
 load_dotenv()
 
+def get_connection():
+    return mysql.connector.connect(
+    host=os.getenv("DB_HOST"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASS"),
+    database= os.getenv("DB_NAME"),
+    )
+
 def crearSitio(bienesAfectados, incidenciasPorAnio, historicoDelitosPorMes, incidenciasPorEstado):
+
+    entidades = incidenciasPorEstado["entidad"].unique().tolist()
+
+    # Querie consultas dinamicas
+    incidenciaMesEstado = """SELECT mes, SUM(incidencia_delictiva) AS incidencia_mensual
+                        FROM delitos WHERE entidad = %s
+                        GROUP BY mes
+                        ORDER BY incidencia_mensual DESC;"""
+    
+ 
+
     st.set_page_config(
         page_title="Delitos México",
         page_icon=":bar_chart:",
@@ -19,12 +38,17 @@ def crearSitio(bienesAfectados, incidenciasPorAnio, historicoDelitosPorMes, inci
     "Se muestran los hechos delictivos ocurridos entre 2015 y noviembre 2025. ")
    
     with st.container(border=True):
+        with st.expander("Incidentes por año"):
+            st.write("El gráfico muestra que el año con mas incidentes reportados es 2023 con un total de 2,173,522 " \
+            "que representa el 10.1 %. Mientras que el año con menos incidentes reportados es 2015 con un total de" \
+            "1,657,804 que representa un 7.68 % del total.")
         fig = px.pie(incidenciasPorAnio, names="anio",values="numero_de_delitos",
                     labels={
                         "anio" : "Año",
                         "numero_de_delitos" : "Delitos registrados"
                     }, title="Incidencias por año", hole=0.4)
         st.plotly_chart(fig, theme=None)
+        
         
         col1, col2 = st.columns(2)
         with col1:
@@ -38,28 +62,38 @@ def crearSitio(bienesAfectados, incidenciasPorAnio, historicoDelitosPorMes, inci
             
         st.header("Número de incidencias por estado", text_alignment="center")
 
-        top_n = st.slider(
+        top_n_incidentes_estado = st.slider(
             "Mostrar top N entidades",
             min_value=1,
             max_value=len(incidenciasPorEstado),
             value=5)
 
         incidenciasPorEstado_plot = (
-            incidenciasPorEstado.head(top_n)
+            incidenciasPorEstado.head(top_n_incidentes_estado)
         )
         st.bar_chart(incidenciasPorEstado_plot, x="entidad", y="incidencia_por_estado", 
                      x_label="Entidad", y_label="Número de incidentes",
                      color="#ff24bd")
         
+        opciones_entidades = st.selectbox(
+            "Selecciona la entidad a consultar",
+            entidades
+        )
+
+        with get_connection() as conn:
+            incidenciasMesEstadoDF = pd.read_sql(incidenciaMesEstado, conn, params=[opciones_entidades])
+        
+        incidenciasMesEstadoDF["mes"] = pd.Categorical(
+            incidenciasMesEstadoDF["mes"],
+            categories= incidenciasMesEstadoDF["mes"],
+            ordered=True
+        )
+        
+        st.title(f"Delitos por mes de {opciones_entidades}")
+        st.bar_chart(incidenciasMesEstadoDF, x="mes", y="incidencia_mensual",
+                     x_label="Entidad", y_label="Incidencia por mes", color="#5B9E55")
 
 
-def get_connection():
-    return mysql.connector.connect(
-    host=os.getenv("DB_HOST"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASS"),
-    database= os.getenv("DB_NAME"),
-    )
 
 #Queries
 
@@ -83,6 +117,7 @@ incidenciasPorEstado = """SELECT entidad, SUM(incidencia_delictiva) as incidenci
                         """
 
 
+
 with get_connection() as conn: 
     bienesAfectadosDF = pd.read_sql(bienesAfectados, conn)
 
@@ -94,7 +129,6 @@ with get_connection() as conn:
 
 with get_connection() as conn:
     incidenciasPorEstadoDF = pd.read_sql(incidenciasPorEstado, conn)
-
 
 bienesAfectadosDF["bien_juridico_afectado"] = pd.Categorical(
     bienesAfectadosDF["bien_juridico_afectado"],
